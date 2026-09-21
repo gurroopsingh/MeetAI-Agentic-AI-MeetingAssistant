@@ -1,0 +1,125 @@
+@import "tailwindcss";
+
+@theme {
+  --color-background: hsl(222, 47%, 11%);
+  --color-foreground: hsl(210, 40%, 98%);
+  --color-card: hsl(222, 47%, 14%);
+  --color-card-foreground: hsl(210, 40%, 98%);
+  --color-primary: hsl(239, 84%, 67%);
+  --color-primary-foreground: hsl(0, 0%, 100%);
+  --color-secondary: hsl(222, 47%, 18%);
+  --color-secondary-foreground: hsl(210, 40%, 98%);
+  --color-muted: hsl(222, 47%, 18%);
+  --color-muted-foreground: hsl(215, 20%, 55%);
+  --color-accent: hsl(262, 83%, 68%);
+  --color-border: hsl(222, 47%, 22%);
+  --color-input: hsl(222, 47%, 18%);
+  --color-popover: hsl(222, 47%, 14%);
+  --color-destructive: hsl(0, 84%, 60%);
+  --radius: 0.75rem;
+}
+
+@layer base {
+  * {
+    box-sizing: border-box;
+    border-color: var(--color-border);
+  }
+
+  html {
+    color-scheme: dark;
+  }
+
+  body {
+    background-color: var(--color-background);
+    color: var(--color-foreground);
+    font-family: var(--font-inter, 'Inter'), system-ui, sans-serif;
+    -webkit-font-smoothing: antialiased;
+  }
+
+  ::-webkit-scrollbar {
+    width: 6px;
+    height: 6px;
+  }
+
+  ::-webkit-scrollbar-track {
+    background: transparent;
+  }
+
+  ::-webkit-scrollbar-thumb {
+    background: var(--color-border);
+    border-radius: 3px;
+  }
+
+  ::-webkit-scrollbar-thumb:hover {
+    background: var(--color-muted-foreground);
+  }
+}
+
+/* --- Reusable utility classes --- */
+.glass {
+  background: rgba(255, 255, 255, 0.04);
+  backdrop-filter: blur(12px);
+  border: 1px solid rgba(255, 255, 255, 0.08);
+}
+
+.glass-card {
+  background: var(--color-card);
+  border: 1px solid var(--color-border);
+  border-radius: var(--radius);
+}
+
+.gradient-primary {
+  background: linear-gradient(135deg, hsl(239, 84%, 67%), hsl(262, 83%, 68%));
+}
+
+.gradient-text {
+  background: linear-gradient(135deg, hsl(239, 84%, 67%), hsl(262, 83%, 68%));
+  -webkit-background-clip: text;
+  -webkit-text-fill-color: transparent;
+  background-clip: text;
+}
+
+.glow {
+  box-shadow: 0 0 30px rgba(99, 102, 241, 0.15);
+}
+
+.sidebar-link {
+  display: flex;
+  align-items: center;
+  gap: 0.75rem;
+  padding: 0.5rem 0.75rem;
+  border-radius: 0.5rem;
+  font-size: 0.875rem;
+  font-weight: 500;
+  transition: all 0.2s;
+  cursor: pointer;
+  color: var(--color-muted-foreground);
+  text-decoration: none;
+}
+
+.sidebar-link:hover {
+  background: rgba(255, 255, 255, 0.05);
+  color: var(--color-foreground);
+}
+
+.sidebar-link.active {
+  background: rgba(99, 102, 241, 0.1);
+  color: var(--color-primary);
+  box-shadow: inset 2px 0 0 var(--color-primary);
+}
+
+/* Light mode overrides */
+.light {
+  --color-background: hsl(0, 0%, 98%);
+  --color-foreground: hsl(222, 47%, 11%);
+  --color-card: hsl(0, 0%, 100%);
+  --color-card-foreground: hsl(222, 47%, 11%);
+  --color-primary: hsl(239, 84%, 60%);
+  --color-secondary: hsl(210, 40%, 96%);
+  --color-secondary-foreground: hsl(222, 47%, 11%);
+  --color-muted: hsl(210, 40%, 96%);
+  --color-muted-foreground: hsl(215, 20%, 45%);
+  --color-border: hsl(214, 32%, 91%);
+  --color-input: hsl(214, 32%, 91%);
+  --color-popover: hsl(0, 0%, 100%);
+}
