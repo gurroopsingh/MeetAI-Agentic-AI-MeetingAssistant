@@ -1,0 +1,61 @@
+# MeetAI .gitignore
+
+# ── Python / Backend ──────────────────────────────────
+__pycache__/
+*.py[cod]
+*$py.class
+*.so
+.Python
+env/
+venv/
+.venv/
+pip-wheel-metadata/
+*.egg-info/
+dist/
+build/
+
+# Database (dev DB — do not commit)
+backend/meetai.db
+backend/*.db
+
+# Uploads
+backend/uploads/
+
+# Environment
+.env
+*.env.local
+
+# ── Node / Frontend ───────────────────────────────────
+node_modules/
+.next/
+out/
+.npm
+.eslintcache
+
+# Build artifacts
+frontend/dist/
+frontend/build/
+
+# ── IDE ───────────────────────────────────────────────
+.vscode/
+.idea/
+*.swp
+*.swo
+
+# ── OS ────────────────────────────────────────────────
+.DS_Store
+Thumbs.db
+desktop.ini
+
+# ── Logs ──────────────────────────────────────────────
+*.log
+logs/
+npm-debug.log*
+yarn-debug.log*
+yarn-error.log*
+
+# ── Secrets (never commit!) ───────────────────────────
+*.pem
+*.key
+*.cert
+secrets/
