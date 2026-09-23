@@ -8,7 +8,7 @@ import json
 import sys
 
 BASE = "http://localhost:8000"
-VIDEO = "test_meeting.mp4"
+VIDEO = "../test_meeting.mp4"
 
 print("=" * 60)
 print("MeetAI Azure Integration Test")

@@ -25,8 +25,8 @@ MEETING_SCRIPT = [
     ("en-US-GuyNeural",   "Perfect. Same time next week everyone. Thanks!"),
 ]
 
-OUTPUT_WAV = "test_meeting_audio.wav"
-OUTPUT_MP4 = "test_meeting.mp4"
+OUTPUT_WAV = "../test_meeting_audio.wav"
+OUTPUT_MP4 = "../test_meeting.mp4"
 WAV_RATE = 16000
 WAV_CHANNELS = 1
 WAV_SAMPWIDTH = 2  # 16-bit

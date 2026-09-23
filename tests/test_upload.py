@@ -1,7 +1,7 @@
 import requests
 import time
 
-res = requests.post('http://localhost:8000/api/meetings/upload', files={'file': ('sample.mp4', open('sample.mp4', 'rb'), 'video/mp4')})
+res = requests.post('http://localhost:8000/api/meetings/upload', files={'file': ('sample.mp4', open('../sample.mp4', 'rb'), 'video/mp4')})
 print('Upload response:', res.status_code, res.json())
 meeting_id = res.json()['id']
 status = res.json()['status']
