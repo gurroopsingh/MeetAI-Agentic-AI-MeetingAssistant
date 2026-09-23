@@ -6,6 +6,9 @@ MeetAI is an advanced, agentic AI meeting assistant built to automate the post-m
 
 This project was built as the final capstone for **AI-103**, demonstrating real-world integration of generative AI and NLP services in a modern full-stack application.
 
+**🔗 Live Demo:** [https://meetai-frontend.onrender.com/](https://meetai-frontend.onrender.com/)  
+**📺 Video Explanation:** [Watch on YouTube](https://www.youtube.com/watch?v=tDK7J19m5bY)
+
 ---
 
 ## ✨ Key Capabilities
