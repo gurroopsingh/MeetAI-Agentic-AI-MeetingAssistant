@@ -1,26 +1,23 @@
 """
 Azure Speech Provider — REST API implementation (no SDK, avoids Windows threading issues).
 
-Uses Azure Speech Services REST API for batch/continuous transcription:
-  POST https://{region}.stt.speech.microsoft.com/speech/recognition/conversation/cognitiveservices/v1
+Uses Azure Speech Services Fast Transcription API:
+  POST {SPEECH_ENDPOINT}/speechtotext/transcriptions:transcribe?api-version=2025-10-15
   
-Audio extracted via FFmpeg (16kHz mono WAV). Each WAV chunk is sent to the REST API.
+Audio extracted via FFmpeg (16kHz mono WAV).
 """
 import os
 import asyncio
 import subprocess
 import logging
-import struct
-import wave
+import json
+import re
 import requests as req_lib
 
 from typing import List, Dict, Optional
 from providers.base import SpeechProvider
 
 logger = logging.getLogger(__name__)
-
-# Max audio chunk for REST API (< 60s or < 25MB per request)
-CHUNK_DURATION_SEC = 55  # Send in 55-second chunks
 
 
 def _check_ffmpeg() -> bool:
@@ -31,181 +28,48 @@ def _check_ffmpeg() -> bool:
         return False
 
 
-def _get_wav_duration(wav_path: str) -> float:
-    """Get duration of a WAV file in seconds."""
-    try:
-        with wave.open(wav_path, "rb") as wf:
-            frames = wf.getnframes()
-            rate = wf.getframerate()
-            return frames / float(rate)
-    except Exception:
-        return 0.0
-
-
-def _split_wav(wav_path: str, chunk_dur_sec: int) -> List[str]:
-    """Split a WAV file into chunks using FFmpeg."""
-    chunks = []
-    total_dur = _get_wav_duration(wav_path)
-    if total_dur <= 0:
-        return [wav_path]
-
-    n_chunks = max(1, int(total_dur / chunk_dur_sec) + (1 if total_dur % chunk_dur_sec else 0))
-    if n_chunks == 1:
-        return [wav_path]
-
-    base = wav_path.rsplit(".", 1)[0]
-    for i in range(n_chunks):
-        start = i * chunk_dur_sec
-        chunk_path = f"{base}_chunk{i:03d}.wav"
-        cmd = [
-            "ffmpeg", "-y",
-            "-i", wav_path,
-            "-ss", str(start),
-            "-t", str(chunk_dur_sec),
-            "-acodec", "pcm_s16le",
-            "-ar", "16000",
-            "-ac", "1",
-            chunk_path,
-        ]
-        result = subprocess.run(cmd, capture_output=True, timeout=120)
-        if result.returncode == 0 and os.path.exists(chunk_path):
-            chunks.append((chunk_path, start))
-
-    return chunks  # List of (path, offset_seconds)
-
-
-def _transcribe_chunk_rest(wav_path: str, api_key: str, region: str, language: str = "en-US") -> List[Dict]:
+def _enrich_speakers_with_names(segments: List[Dict]) -> None:
     """
-    Send a WAV chunk to Azure Speech REST API.
-    Returns list of {text, start_time, end_time, speaker, confidence} segments.
+    Detect explicit self-introductions in the transcript (e.g., 'I am Eric Johnson')
+    and map the diarized speaker ID to the stated name.
     """
-    url = (
-        f"https://{region}.stt.speech.microsoft.com/speech/recognition/"
-        f"conversation/cognitiveservices/v1"
-        f"?language={language}&format=detailed"
+    speaker_names = {}
+    pattern = re.compile(
+        r"(?i:hi|hello|hey)?[\s,]*"
+        r"(?i:i'm|i am|this is|my name is)\s+"
+        r"([A-Z][a-z]+(?:\s+[A-Z][a-z]+)?)"
     )
-    headers = {
-        "Ocp-Apim-Subscription-Key": api_key,
-        "Content-Type": "audio/wav; codecs=audio/pcm; samplerate=16000",
-        "Accept": "application/json",
-    }
-    with open(wav_path, "rb") as f:
-        data = f.read()
-
-    response = req_lib.post(url, headers=headers, data=data, timeout=120)
-
-    if response.status_code != 200:
-        logger.error("Azure Speech REST error %d: %s", response.status_code, response.text[:300])
-        return []
-
-    result = response.json()
-    status = result.get("RecognitionStatus", "")
-    if status == "NoMatch" or status == "InitialSilenceTimeout":
-        logger.info("No speech recognized in this chunk (status=%s).", status)
-        return []
-
-    if status != "Success":
-        logger.warning("Non-success recognition status: %s", status)
-
-    display_text = result.get("DisplayText", "").strip()
-    if not display_text:
-        return []
-
-    # Detailed N-best results with timing
-    n_best = result.get("NBest", [])
-    if n_best:
-        best = n_best[0]
-        words = best.get("Words", [])
-        confidence = best.get("Confidence", None)
-
-        if words:
-            # Group words into segments by silence gaps (>1s gaps)
-            segments = []
-            current_words = []
-            current_start = None
-
-            for word in words:
-                # Word timing in 100-nanosecond units
-                w_offset = word.get("Offset", 0) / 10_000_000.0
-                w_dur = word.get("Duration", 0) / 10_000_000.0
-                w_text = word.get("Word", "")
-
-                if current_start is None:
-                    current_start = w_offset
-
-                current_words.append((w_text, w_offset, w_offset + w_dur))
-
-                # Check for a gap > 1.5s to start a new segment
-                if len(current_words) > 1:
-                    prev_end = current_words[-2][2]
-                    if w_offset - prev_end > 1.5 and len(current_words) > 5:
-                        seg_text = " ".join(w[0] for w in current_words[:-1])
-                        seg_start = current_words[0][1]
-                        seg_end = current_words[-2][2]
-                        segments.append({
-                            "text": seg_text,
-                            "start_time": round(seg_start, 3),
-                            "end_time": round(seg_end, 3),
-                            "speaker": None,
-                            "confidence": round(confidence, 3) if confidence else None,
-                        })
-                        current_words = [current_words[-1]]
-                        current_start = w_offset
-
-            # Flush remaining words
-            if current_words:
-                seg_text = " ".join(w[0] for w in current_words)
-                seg_start = current_words[0][1]
-                seg_end = current_words[-1][2]
-                segments.append({
-                    "text": seg_text,
-                    "start_time": round(seg_start, 3),
-                    "end_time": round(seg_end, 3),
-                    "speaker": None,
-                    "confidence": round(confidence, 3) if confidence else None,
-                })
-            return segments
-
-    # Fallback: single segment with the whole recognised text
-    # Use the overall offset from RecognitionResult if available
-    offset_raw = result.get("Offset", 0)
-    duration_raw = result.get("Duration", 0)
-    start_sec = offset_raw / 10_000_000.0
-    end_sec = start_sec + (duration_raw / 10_000_000.0)
-    return [{
-        "text": display_text,
-        "start_time": round(start_sec, 3),
-        "end_time": round(max(end_sec, start_sec + 1.0), 3),
-        "speaker": None,
-        "confidence": None,
-    }]
+    for seg in segments:
+        speaker_id = seg.get("speaker")
+        text = seg.get("text", "")
+        if speaker_id and speaker_id not in speaker_names:
+            match = pattern.search(text)
+            if match:
+                speaker_names[speaker_id] = match.group(1)
+                logger.info(f"Explicitly mapped {speaker_id} to {speaker_names[speaker_id]}")
+    
+    # Apply the names back to all segments
+    for seg in segments:
+        speaker_id = seg.get("speaker")
+        if speaker_id in speaker_names:
+            seg["speaker"] = speaker_names[speaker_id]
 
 
 class AzureSpeechProvider(SpeechProvider):
     """
-    Azure AI Speech provider using the REST API.
-    Works reliably on Windows without SDK threading issues.
+    Azure AI Speech provider using the Fast Transcription REST API.
     """
 
     def __init__(self):
         self.api_key = os.getenv("SPEECH_API_KEY")
         self.endpoint = os.getenv("SPEECH_ENDPOINT", "")
-        self.region = self._extract_region(self.endpoint)
         self.language = os.getenv("SPEECH_LANGUAGE", "en-US")
 
         if not self.api_key:
             raise ValueError("SPEECH_API_KEY is not set.")
-        if not self.region:
-            raise ValueError(f"Cannot determine Speech region from SPEECH_ENDPOINT: {self.endpoint}")
-        logger.info("AzureSpeechProvider (REST) — Region: %s", self.region)
-
-    def _extract_region(self, endpoint: str) -> Optional[str]:
-        if not endpoint:
-            return None
-        # https://koreacentral.api.cognitive.microsoft.com/ → koreacentral
-        host = endpoint.replace("https://", "").replace("http://", "").split("/")[0]
-        parts = host.split(".")
-        return parts[0] if parts else None
+        if not self.endpoint:
+            raise ValueError("SPEECH_ENDPOINT is not set.")
+        logger.info("AzureSpeechProvider (Fast Transcription) initialized.")
 
     async def extract_audio(self, video_path: str) -> str:
         """Extract 16kHz mono WAV from video using FFmpeg."""
@@ -243,55 +107,66 @@ class AzureSpeechProvider(SpeechProvider):
             return video_path
 
     async def transcribe(self, audio_path: str) -> List[Dict]:
-        """Transcribe audio via Azure Speech REST, splitting into chunks if needed."""
+        """Transcribe audio via Azure Speech Fast Transcription API with diarization."""
         if not audio_path or not os.path.exists(audio_path):
             logger.warning("Audio file not found: %s", audio_path)
             return []
 
-        logger.info("Transcribing via Azure Speech REST: %s", audio_path)
+        logger.info("Transcribing via Azure Fast Transcription API: %s", audio_path)
 
         def run_transcription():
-            duration = _get_wav_duration(audio_path)
-            logger.info("Audio duration: %.1f seconds", duration)
+            base_url = self.endpoint.rstrip("/")
+            url = f"{base_url}/speechtotext/transcriptions:transcribe?api-version=2025-10-15"
+            headers = {
+                "Ocp-Apim-Subscription-Key": self.api_key,
+                "Accept": "application/json",
+            }
+            properties = {
+                "locales": [self.language],
+                "diarization": {
+                    "enabled": True,
+                    "maxSpeakers": 8
+                }
+            }
 
-            if duration <= 0:
-                logger.warning("Could not determine audio duration.")
-                # Attempt transcription anyway
-                return _transcribe_chunk_rest(audio_path, self.api_key, self.region, self.language)
+            try:
+                with open(audio_path, "rb") as f:
+                    files = {
+                        "definition": (None, json.dumps(properties), "application/json"),
+                        "audio": ("audio.wav", f, "audio/wav")
+                    }
+                    response = req_lib.post(url, headers=headers, files=files, timeout=300)
 
-            if duration <= CHUNK_DURATION_SEC:
-                # Single request
-                segments = _transcribe_chunk_rest(audio_path, self.api_key, self.region, self.language)
+                if response.status_code != 200:
+                    logger.error("Azure Fast Transcription error %d: %s", response.status_code, response.text[:500])
+                    return []
+
+                result = response.json()
+                segments = []
+                phrases = result.get("phrases", [])
+                
+                for phrase in phrases:
+                    speaker_num = phrase.get("speaker")
+                    speaker_str = f"Speaker {speaker_num}" if speaker_num else None
+                    
+                    start_time = phrase.get("offsetMilliseconds", 0) / 1000.0
+                    end_time = start_time + (phrase.get("durationMilliseconds", 0) / 1000.0)
+                    
+                    segments.append({
+                        "text": phrase.get("text", "").strip(),
+                        "start_time": round(start_time, 3),
+                        "end_time": round(end_time, 3),
+                        "speaker": speaker_str,
+                        "confidence": phrase.get("confidence", 1.0)
+                    })
+
+                # Safe speaker-name enrichment
+                _enrich_speakers_with_names(segments)
+                
                 return segments
-            else:
-                # Split into chunks
-                logger.info("Audio > %ds, splitting into chunks.", CHUNK_DURATION_SEC)
-                chunk_info = _split_wav(audio_path, CHUNK_DURATION_SEC)
-                all_segments = []
-
-                for item in chunk_info:
-                    if isinstance(item, tuple):
-                        chunk_path, offset = item
-                    else:
-                        chunk_path, offset = item, 0.0
-
-                    if not os.path.exists(chunk_path):
-                        continue
-
-                    segs = _transcribe_chunk_rest(chunk_path, self.api_key, self.region, self.language)
-                    # Add offset to all timestamps
-                    for seg in segs:
-                        seg["start_time"] = round(seg["start_time"] + offset, 3)
-                        seg["end_time"] = round(seg["end_time"] + offset, 3)
-                    all_segments.extend(segs)
-
-                    # Cleanup chunk file
-                    try:
-                        os.remove(chunk_path)
-                    except Exception:
-                        pass
-
-                return all_segments
+            except Exception as e:
+                logger.error("Fast transcription request failed: %s", str(e))
+                raise
 
         try:
             segments = await asyncio.to_thread(run_transcription)
